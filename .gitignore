@@ -10,11 +10,25 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+out/
 *.local
+.env
+.env.*
+!.env.example
+
+# Electron / electron-builder artifacts
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.snap
+*.blockmap
+latest*.yml
+builder-debug.yml
+builder-effective-config.yaml
 
 # Next.js build output
 .next/
-out/
 
 # Editor directories and files
 .vscode/*
@@ -26,3 +40,10 @@ out/
 *.njsproj
 *.sln
 *.sw?
+*.code-workspace
+
+# Project-local caches and OS junk
+.cursor/
+.terminals/
+Thumbs.db
+Desktop.ini
