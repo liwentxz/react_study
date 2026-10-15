@@ -1,12 +1,18 @@
 {
-  "name": "react_study",
+  "name": "device-ledger",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "二手设备出入账管理系统",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron": "electron .",
+    "electron:dev": "electron .",
+    "dist": "npm run build && electron-builder --win nsis",
+    "dist:dir": "npm run build && electron-builder --win --dir"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
@@ -14,13 +20,37 @@
     "dayjs": "^1.11.23",
     "next": "^15.2.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "react-resizable": "^4.0.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "electron": "^36.9.5",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.2.0"
+  },
+  "build": {
+    "appId": "com.ledger.device",
+    "productName": "二手设备出入账管理",
+    "files": [
+      "out/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "出入账管理"
+    }
   }
 }

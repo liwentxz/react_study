@@ -30,9 +30,53 @@ import {
   EditOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
+import "dayjs/locale/zh-cn";
+import zhCN from "antd/locale/zh_CN";
+import { Resizable } from "react-resizable";
+import * as XLSX from "xlsx";
 dayjs.locale("zh-cn");
 
+const ResizableTitle = (props) => {
+  const { onResize, width, ...restProps } = props;
+  if (!width) return <th {...restProps} />;
+  return (
+    <Resizable
+      width={width}
+      height={0}
+      handle={
+        <span
+          className="react-resizable-handle"
+          onClick={(e) => e.stopPropagation()}
+        />
+      }
+      onResize={onResize}
+      draggableOpts={{ enableUserSelectHack: false }}
+    >
+      <th {...restProps} />
+    </Resizable>
+  );
+};
+
 const KEY = "device_ledger_v1";
+const METHOD_OPTIONS = [
+  "当面",
+  "邮寄",
+  "咸鱼",
+  "小红书",
+  "微信",
+  "抖音",
+  "转转",
+  "同行",
+  "其他",
+];
+const toArr = (v) =>
+  Array.isArray(v)
+    ? v.filter(Boolean)
+    : String(v || "")
+        .split(/[、,，/]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+const joinMethod = (v) => toArr(v).join("、");
 const n = (v) => Number(v) || 0;
 const calcProfit = (r) =>
   n(r.sellPrice) -
@@ -53,51 +97,6 @@ function weekKey(d) {
   const w = Math.ceil(((dt - o) / 86400000 + o.getDay() + 1) / 7);
   return `${dt.getFullYear()}-W${String(w).padStart(2, "0")}`;
 }
-function seed() {
-  const brands = [
-    ["Apple", "iPhone 15 Pro", "256GB"],
-    ["Apple", "iPhone 14", "128GB"],
-    ["华为", "Mate 60 Pro", "512GB"],
-    ["小米", "14 Ultra", "16+512GB"],
-    ["OPPO", "Find X7", "12+256GB"],
-  ];
-  const arr = [];
-  for (let i = 0; i < 18; i++) {
-    const b = brands[i % brands.length];
-    const m = String(5 + (i % 6)).padStart(2, "0");
-    const buy = 2800 + ((i * 317) % 2500);
-    const sell = buy + 300 + ((i * 211) % 900);
-    arr.push({
-      id: "seed" + i,
-      buyDate: `2026-${m}-0${(i % 8) + 1}`,
-      brand: b[0],
-      model: b[1],
-      memory: b[2],
-      color: ["黑色", "白色", "蓝色", "钛原色"][i % 4],
-      buyPrice: buy,
-      sellPrice: i % 5 === 4 ? "" : sell,
-      accessoryFee: 20,
-      repairFee: i % 3 === 0 ? 150 : 0,
-      exposeFee: 30,
-      buyShipFee: 12,
-      sellShipFee: 12,
-      agentFee: 0,
-      platformFee: 60,
-      condition: "成色好 功能全好",
-      buyAddr: "深圳",
-      buyMethod: "邮寄",
-      sellAddr: i % 5 === 4 ? "" : "广州",
-      sellMethod: "平台(闲鱼/转转)",
-      buySendDate: `2026-${m}-0${(i % 8) + 1}`,
-      buyArriveDate: `2026-${m}-0${(i % 8) + 2}`,
-      sellSendDate: "",
-      sellArriveDate: "",
-      incomeDate: i % 5 === 4 ? "" : `2026-${m}-1${i % 8}`,
-    });
-  }
-  return arr;
-}
-
 function Inner() {
   const { message } = App.useApp();
   const [mounted, setMounted] = useState(false);
@@ -107,18 +106,20 @@ function Inner() {
   const [form] = Form.useForm();
   const [qform] = Form.useForm();
   const [filters, setFilters] = useState({});
+  const [colWidths, setColWidths] = useState({});
+  const handleResize =
+    (key) =>
+    (e, { size }) => {
+      setColWidths((p) => ({ ...p, [key]: size.width }));
+    };
   useEffect(() => {
     setMounted(true);
     try {
       const raw = localStorage.getItem(KEY);
       if (raw) setRows(JSON.parse(raw));
-      else {
-        const s = seed();
-        setRows(s);
-        localStorage.setItem(KEY, JSON.stringify(s));
-      }
+      else setRows([]);
     } catch {
-      setRows(seed());
+      setRows([]);
     }
   }, []);
   useEffect(() => {
@@ -140,8 +141,8 @@ function Inner() {
         if (f.brand && !(r.brand || "").includes(f.brand)) return false;
         if (f.model && !(r.model || "").includes(f.model)) return false;
         if (f.memory && !(r.memory || "").includes(f.memory)) return false;
-        if (f.status === "sold" && !r.sellPrice) return false;
-        if (f.status === "stock" && r.sellPrice) return false;
+        if (f.status === "sold" && !(n(r.sellPrice) > 0)) return false;
+        if (f.status === "stock" && n(r.sellPrice) > 0) return false;
         if (f.keyword && !JSON.stringify(r).includes(f.keyword)) return false;
         return true;
       }),
@@ -179,58 +180,208 @@ function Inner() {
     return Object.values(map).sort((a, b) => a.month.localeCompare(b.month));
   }, [rows]);
   const maxSell = Math.max(1, ...monthly.map((m) => m.sell));
+  const maxAbsProfit = Math.max(1, ...monthly.map((x) => Math.abs(x.profit)));
+  const soldRows = useMemo(
+    () => rows.filter((r) => n(r.sellPrice) > 0),
+    [rows],
+  );
+  const stockRows = useMemo(
+    () => rows.filter((r) => !(n(r.sellPrice) > 0)),
+    [rows],
+  );
+  const avgProfit = soldRows.length
+    ? Math.round(total.profit / soldRows.length)
+    : 0;
+  const margin = total.sell ? (total.profit / total.sell) * 100 : 0;
+  const stockValue = useMemo(
+    () => stockRows.reduce((s, r) => s + n(r.buyPrice), 0),
+    [stockRows],
+  );
+  const feeBreak = useMemo(() => {
+    const o = {
+      accessoryFee: 0,
+      repairFee: 0,
+      exposeFee: 0,
+      buyShipFee: 0,
+      sellShipFee: 0,
+      agentFee: 0,
+      platformFee: 0,
+    };
+    rows.forEach((r) => {
+      Object.keys(o).forEach((k) => (o[k] += n(r[k])));
+    });
+    const labels = {
+      accessoryFee: "配件",
+      repairFee: "维修",
+      exposeFee: "曝光",
+      buyShipFee: "收购邮费",
+      sellShipFee: "出售邮费",
+      agentFee: "代理",
+      platformFee: "平台",
+    };
+    return Object.entries(o)
+      .map(([k, v]) => ({
+        key: k,
+        name: labels[k],
+        value: v,
+        pct: total.fee ? (v / total.fee) * 100 : 0,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [rows, total.fee]);
+  const maxFee = Math.max(1, ...feeBreak.map((f) => f.value));
+  const brandStat = useMemo(() => {
+    const m = {};
+    rows.forEach((r) => {
+      const k = r.brand || "未知";
+      m[k] = m[k] || { brand: k, count: 0, sold: 0, sell: 0, profit: 0 };
+      m[k].count++;
+      if (r.sellPrice) m[k].sold++;
+      m[k].sell += n(r.sellPrice);
+      m[k].profit += calcProfit(r);
+    });
+    return Object.values(m).sort((a, b) => b.profit - a.profit);
+  }, [rows]);
+  const methodStat = useMemo(() => {
+    const m = {};
+    rows.forEach((r) => {
+      toArr(r.sellMethod).forEach((k) => {
+        const key = k || "未售";
+        m[key] = m[key] || { name: key, count: 0, profit: 0 };
+        m[key].count++;
+        m[key].profit += calcProfit(r);
+      });
+      if (toArr(r.sellMethod).length === 0) {
+        m["未售"] = m["未售"] || { name: "未售", count: 0, profit: 0 };
+        m["未售"].count++;
+        m["未售"].profit += calcProfit(r);
+      }
+    });
+    return Object.values(m).sort((a, b) => b.count - a.count);
+  }, [rows]);
+  const bestMonth = monthly.length
+    ? [...monthly].sort((a, b) => b.profit - a.profit)[0]
+    : null;
+  const recentSold = useMemo(
+    () =>
+      [...soldRows]
+        .sort((a, b) =>
+          String(b.incomeDate || b.sellSendDate || "").localeCompare(
+            String(a.incomeDate || a.sellSendDate || ""),
+          ),
+        )
+        .slice(0, 6),
+    [soldRows],
+  );
 
+  const isSold = (r) => n(r.sellPrice) > 0;
+  const feeOf = (r) =>
+    n(r.accessoryFee) +
+    n(r.repairFee) +
+    n(r.exposeFee) +
+    n(r.buyShipFee) +
+    n(r.sellShipFee) +
+    n(r.agentFee) +
+    n(r.platformFee);
   const columns = [
     {
       title: "收购日期",
       dataIndex: "buyDate",
       key: "buyDate",
-      width: 110,
-      render: (v, r) => (
-        <>
-          {v}
-          <br />
-          <span style={{ color: "#999", fontSize: 11 }}>
-            入账:{r.incomeDate || "-"}
-          </span>
-        </>
-      ),
+      width: 105,
+      fixed: "left",
     },
     {
-      title: "品牌型号",
-      key: "bm",
-      render: (_, r) => (
-        <b>
-          {r.brand} {r.model}
-        </b>
-      ),
+      title: "品牌",
+      dataIndex: "brand",
+      key: "brand",
+      width: 90,
+      fixed: "left",
     },
     {
-      title: "内存/颜色",
-      key: "mc",
-      render: (_, r) => (
-        <>
-          {r.memory}
-          <br />
-          {r.color}
-        </>
-      ),
+      title: "型号",
+      dataIndex: "model",
+      key: "model",
+      width: 130,
+      fixed: "left",
     },
+    { title: "颜色", dataIndex: "color", key: "color", width: 80 },
+    { title: "内存", dataIndex: "memory", key: "memory", width: 100 },
     {
-      title: "收购价",
+      title: "收购价格",
       dataIndex: "buyPrice",
+      key: "buyPrice",
+      width: 95,
       render: (v) => fmt(v),
       sorter: (a, b) => n(a.buyPrice) - n(b.buyPrice),
     },
     {
-      title: "出售价",
+      title: "出售价格",
       dataIndex: "sellPrice",
-      render: (v) => (v ? fmt(v) : "-"),
+      key: "sellPrice",
+      width: 95,
+      render: (v) => (n(v) ? fmt(v) : "-"),
       sorter: (a, b) => n(a.sellPrice) - n(b.sellPrice),
+    },
+    {
+      title: "配件费",
+      dataIndex: "accessoryFee",
+      key: "accessoryFee",
+      width: 80,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "维修费",
+      dataIndex: "repairFee",
+      key: "repairFee",
+      width: 80,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "曝光费",
+      dataIndex: "exposeFee",
+      key: "exposeFee",
+      width: 80,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "收购邮费",
+      dataIndex: "buyShipFee",
+      key: "buyShipFee",
+      width: 90,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "出售邮费",
+      dataIndex: "sellShipFee",
+      key: "sellShipFee",
+      width: 90,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "代理费",
+      dataIndex: "agentFee",
+      key: "agentFee",
+      width: 80,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "平台费",
+      dataIndex: "platformFee",
+      key: "platformFee",
+      width: 80,
+      render: (v) => fmt(v),
+    },
+    {
+      title: "费用合计",
+      key: "feeAll",
+      width: 95,
+      render: (_, r) => fmt(feeOf(r)),
+      sorter: (a, b) => feeOf(a) - feeOf(b),
     },
     {
       title: "利润",
       key: "p",
+      width: 100,
       render: (_, r) => {
         const p = calcProfit(r);
         return (
@@ -246,8 +397,102 @@ function Inner() {
     {
       title: "状态",
       key: "s",
+      width: 80,
+      filters: [
+        { text: "已售", value: "sold" },
+        { text: "在库", value: "stock" },
+      ],
+      onFilter: (v, r) => (v === "sold" ? isSold(r) : !isSold(r)),
       render: (_, r) =>
-        r.sellPrice ? <Tag color="green">已售</Tag> : <Tag>在库</Tag>,
+        isSold(r) ? (
+          <Tag color="green">已售</Tag>
+        ) : (
+          <Tag color="default">在库</Tag>
+        ),
+    },
+    {
+      title: "机况描述",
+      dataIndex: "condition",
+      key: "condition",
+      width: 160,
+      ellipsis: true,
+    },
+    { title: "收购地址", dataIndex: "buyAddr", key: "buyAddr", width: 100 },
+    {
+      title: "收购方式",
+      dataIndex: "buyMethod",
+      key: "buyMethod",
+      width: 150,
+      render: (v) =>
+        toArr(v).length ? (
+          <span>
+            {toArr(v).map((x) => (
+              <Tag key={x}>{x}</Tag>
+            ))}
+          </span>
+        ) : (
+          "-"
+        ),
+    },
+    {
+      title: "出售地址",
+      dataIndex: "sellAddr",
+      key: "sellAddr",
+      width: 100,
+      render: (v) => v || "-",
+    },
+    {
+      title: "出售方式",
+      dataIndex: "sellMethod",
+      key: "sellMethod",
+      width: 180,
+      render: (v) =>
+        toArr(v).length ? (
+          <span>
+            {toArr(v).map((x) => (
+              <Tag key={x} color="blue">
+                {x}
+              </Tag>
+            ))}
+          </span>
+        ) : (
+          "-"
+        ),
+    },
+    {
+      title: "收购发货日期",
+      dataIndex: "buySendDate",
+      key: "buySendDate",
+      width: 115,
+    },
+    {
+      title: "收购到货日期",
+      dataIndex: "buyArriveDate",
+      key: "buyArriveDate",
+      width: 115,
+    },
+    {
+      title: "出售发货日期",
+      dataIndex: "sellSendDate",
+      key: "sellSendDate",
+      width: 115,
+      render: (v) => v || "-",
+    },
+    {
+      title: "出售到货日期",
+      dataIndex: "sellArriveDate",
+      key: "sellArriveDate",
+      width: 115,
+      render: (v) => v || "-",
+    },
+    {
+      title: "入账日期",
+      dataIndex: "incomeDate",
+      key: "incomeDate",
+      width: 105,
+      render: (v) => v || "-",
+      sorter: (a, b) =>
+        String(a.incomeDate || "").localeCompare(String(b.incomeDate || "")),
     },
     {
       title: "操作",
@@ -264,6 +509,8 @@ function Inner() {
               Object.entries(r).forEach(([k, v]) => {});
               form.setFieldsValue({
                 ...r,
+                buyMethod: toArr(r.buyMethod),
+                sellMethod: toArr(r.sellMethod),
                 buyDate: r.buyDate ? dayjs(r.buyDate) : null,
                 buySendDate: r.buySendDate ? dayjs(r.buySendDate) : null,
                 buyArriveDate: r.buyArriveDate ? dayjs(r.buyArriveDate) : null,
@@ -294,6 +541,15 @@ function Inner() {
     },
   ];
 
+  const mergedColumns = columns.map((c) => ({
+    ...c,
+    width: colWidths[c.key] ?? c.width,
+    onHeaderCell: (col) => ({
+      width: colWidths[col.key] ?? col.width,
+      onResize: handleResize(col.key),
+    }),
+  }));
+
   const onFinish = (v) => {
     const o = { ...v };
     [
@@ -306,6 +562,8 @@ function Inner() {
     ].forEach((k) => {
       o[k] = v[k] ? v[k].format("YYYY-MM-DD") : "";
     });
+    o.buyMethod = joinMethod(v.buyMethod);
+    o.sellMethod = joinMethod(v.sellMethod);
     if (!o.buyDate) return message.error("请填写收购日期");
     if (editing)
       setRows((p) =>
@@ -371,21 +629,106 @@ function Inner() {
       "sellArriveDate",
       "incomeDate",
     ];
-    const lines = [labels.join(",")];
-    filtered.forEach((r) =>
-      lines.push(
-        [
-          ...keys.map((k) => `"${String(r[k] ?? "").replaceAll('"', "'")}"`),
-          calcProfit(r),
-        ].join(","),
-      ),
-    );
-    const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `出入账_${dayjs().format("YYYY-MM-DD")}.csv`;
-    a.click();
+    const data = filtered.map((r) => {
+      const o = {};
+      labels.forEach((lb, i) => {
+        if (i < keys.length) {
+          const k = keys[i];
+          o[lb] =
+            k === "buyMethod" || k === "sellMethod"
+              ? joinMethod(r[k])
+              : (r[k] ?? "");
+        } else {
+          o[lb] = calcProfit(r);
+        }
+      });
+      return o;
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws["!cols"] = labels.map(() => ({ wch: 14 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "出入账");
+    XLSX.writeFile(wb, `出入账_${dayjs().format("YYYY-MM-DD")}.xlsx`);
     message.success(`导出 ${filtered.length} 条`);
+  };
+  const doImportFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        aoa.shift();
+        const keyOrder = [
+          "buyDate",
+          "brand",
+          "model",
+          "color",
+          "memory",
+          "buyPrice",
+          "sellPrice",
+          "accessoryFee",
+          "repairFee",
+          "exposeFee",
+          "buyShipFee",
+          "sellShipFee",
+          "agentFee",
+          "platformFee",
+          "condition",
+          "buyAddr",
+          "buyMethod",
+          "sellAddr",
+          "sellMethod",
+          "buySendDate",
+          "buyArriveDate",
+          "sellSendDate",
+          "sellArriveDate",
+          "incomeDate",
+        ];
+        const fmtDate = (v) => {
+          if (v === "" || v == null) return "";
+          if (typeof v === "number") {
+            const d = XLSX.SSF ? XLSX.SSF.parse_date_code(v) : null;
+            if (d)
+              return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
+            return String(v);
+          }
+          const s = String(v).trim();
+          const m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+          if (m)
+            return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+          return s;
+        };
+        const arr = aoa
+          .filter((row) => row.some((c) => String(c).trim() !== ""))
+          .map((row, i) => {
+            const o = { id: "imp" + Date.now() + i };
+            keyOrder.forEach((k, idx) => {
+              let v = row[idx] ?? "";
+              if (
+                [
+                  "buyDate",
+                  "buySendDate",
+                  "buyArriveDate",
+                  "sellSendDate",
+                  "sellArriveDate",
+                  "incomeDate",
+                ].includes(k)
+              )
+                v = fmtDate(v);
+              else if (typeof v === "string") v = v.trim();
+              o[k] = v;
+            });
+            return o;
+          });
+        setRows((p) => [...arr, ...p]);
+        message.success(`导入成功 ${arr.length} 条`);
+      } catch {
+        message.error("导入失败，请检查 xlsx 格式");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    return false;
   };
 
   if (!mounted) return <Card loading />;
@@ -410,8 +753,9 @@ function Inner() {
             二手设备出入账管理系统
           </div>
           <Tag color="gold">
-            共 {rows.length} 台 · 已售 {rows.filter((r) => r.sellPrice).length}{" "}
-            · 在库 {rows.filter((r) => !r.sellPrice).length}
+            共 {rows.length} 台 · 已售{" "}
+            {rows.filter((r) => n(r.sellPrice) > 0).length} · 在库{" "}
+            {rows.filter((r) => !(n(r.sellPrice) > 0)).length}
           </Tag>
           <span style={{ flex: 1 }} />
           <Space>
@@ -426,9 +770,6 @@ function Inner() {
             >
               填报新机
             </Button>
-            <Button icon={<DownloadOutlined />} onClick={doExport}>
-              导出CSV
-            </Button>
           </Space>
         </div>
       </Card>
@@ -442,104 +783,305 @@ function Inner() {
         ]}
       />
       {tab === "home" && (
-        <>
-          <Row gutter={12}>
-            <Col span={5}>
-              <Card>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Row gutter={[14, 14]}>
+            <Col xs={12} md={5}>
+              <Card style={{ borderTop: "3px solid #5b50e8" }}>
                 <Statistic title="累计台数" value={rows.length} suffix="台" />
+                <div style={{ marginTop: 6 }}>
+                  <Tag color="green">已售 {soldRows.length}</Tag>
+                  <Tag>在库 {stockRows.length}</Tag>
+                </div>
               </Card>
             </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="收购支出" value={total.buy} prefix="¥" />
-              </Card>
-            </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="出售收入" value={total.sell} prefix="¥" />
-              </Card>
-            </Col>
-            <Col span={5}>
-              <Card>
-                <Statistic title="费用合计" value={total.fee} prefix="¥" />
-              </Card>
-            </Col>
-            <Col span={4}>
-              <Card>
+            <Col xs={12} md={5}>
+              <Card style={{ borderTop: "3px solid #f59e0b" }}>
                 <Statistic
-                  title="累计利润"
+                  title="收购支出 / 在库货值"
+                  value={total.buy}
+                  prefix="¥"
+                />
+                <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
+                  在库占用 {fmt(stockValue)}
+                </div>
+              </Card>
+            </Col>
+            <Col xs={12} md={5}>
+              <Card style={{ borderTop: "3px solid #0ea5e9" }}>
+                <Statistic title="出售收入" value={total.sell} prefix="¥" />
+                <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
+                  费用合计 {fmt(total.fee)}
+                </div>
+              </Card>
+            </Col>
+            <Col xs={12} md={5}>
+              <Card style={{ borderTop: "3px solid #16a34a" }}>
+                <Statistic
+                  title="累计利润 / 利润率"
                   value={total.profit}
                   prefix="¥"
-                  valueStyle={{ color: "#16a34a" }}
+                  styles={{
+                    content: {
+                      color: total.profit >= 0 ? "#16a34a" : "#e11d48",
+                    },
+                  }}
                 />
+                <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
+                  利润率 {margin.toFixed(1)}% · 均台 {fmt(avgProfit)}
+                </div>
+              </Card>
+            </Col>
+            <Col xs={24} md={4}>
+              <Card
+                style={{
+                  background: "linear-gradient(135deg,#0f172a,#5b50e8)",
+                  border: "none",
+                  color: "#fff",
+                  height: "100%",
+                }}
+              >
+                <div style={{ color: "#fff", fontSize: 13, opacity: 0.8 }}>
+                  最佳月份
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "#fff" }}>
+                  {bestMonth ? bestMonth.month : "—"}
+                </div>
+                <div style={{ color: "#bbf7d0", fontWeight: 800 }}>
+                  {bestMonth
+                    ? fmt(bestMonth.profit) + " / " + bestMonth.count + "台"
+                    : "暂无"}
+                </div>
               </Card>
             </Col>
           </Row>
-          <Row gutter={12}>
-            <Col span={16}>
-              <Card title="月度利润趋势">
+          <Row gutter={[14, 14]}>
+            <Col xs={24} lg={14}>
+              <Card
+                title="📊 月度经营趋势（收入 / 利润双柱）"
+                extra={<Tag color="blue">共 {monthly.length} 个月</Tag>}
+              >
                 <div
                   style={{
                     display: "flex",
                     alignItems: "flex-end",
-                    gap: 10,
-                    height: 220,
-                    background: "#f8faff",
+                    gap: 12,
+                    height: 250,
+                    background: "linear-gradient(180deg,#f8faff,#fff)",
                     borderRadius: 12,
-                    padding: "14px 10px 8px",
-                    border: "1px dashed #e5e8f1",
+                    padding: "18px 12px 8px",
+                    border: "1px solid #eef0f7",
                   }}
                 >
-                  {monthly.map((m) => (
-                    <div
-                      key={m.month}
+                  {monthly.length === 0 ? (
+                    <div style={{ color: "#999", margin: "auto" }}>
+                      暂无数据
+                    </div>
+                  ) : (
+                    monthly.map((m) => {
+                      const hs = Math.max(8, (m.sell / maxSell) * 160),
+                        hp = Math.max(
+                          m.profit > 0 ? 8 : 2,
+                          (Math.abs(m.profit) / maxAbsProfit) * 120,
+                        );
+                      return (
+                        <div
+                          key={m.month}
+                          style={{
+                            flex: 1,
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: 5,
+                            height: "100%",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 800,
+                              color: m.profit >= 0 ? "#16a34a" : "#e11d48",
+                            }}
+                          >
+                            {m.profit}
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "flex-end",
+                              gap: 4,
+                              height: 170,
+                            }}
+                          >
+                            <div
+                              title={`出售 ${fmt(m.sell)}`}
+                              style={{
+                                width: 18,
+                                height: hs,
+                                borderRadius: "6px 6px 3px 3px",
+                                background:
+                                  "linear-gradient(180deg,#a5b4fc,#5b50e8)",
+                              }}
+                            />
+                            <div
+                              title={`利润 ${fmt(m.profit)}`}
+                              style={{
+                                width: 18,
+                                height: hp,
+                                borderRadius: "6px 6px 3px 3px",
+                                background:
+                                  m.profit >= 0
+                                    ? "linear-gradient(180deg,#6ee7b7,#059669)"
+                                    : "linear-gradient(180deg,#fda4af,#e11d48)",
+                              }}
+                            />
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "#666",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {m.month.slice(5)}月
+                          </span>
+                          <span style={{ fontSize: 11, color: "#999" }}>
+                            {m.count}台
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 14,
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#666",
+                  }}
+                >
+                  <span>
+                    <i
                       style={{
-                        flex: 1,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "flex-end",
-                        gap: 4,
-                        height: "100%",
+                        display: "inline-block",
+                        width: 10,
+                        height: 10,
+                        background: "#5b50e8",
+                        borderRadius: 3,
+                        marginRight: 4,
                       }}
-                    >
-                      <div style={{ fontSize: 11, fontWeight: 800 }}>
-                        {m.profit}
+                    />
+                    出售收入
+                  </span>
+                  <span>
+                    <i
+                      style={{
+                        display: "inline-block",
+                        width: 10,
+                        height: 10,
+                        background: "#059669",
+                        borderRadius: 3,
+                        marginRight: 4,
+                      }}
+                    />
+                    利润
+                  </span>
+                  <span>
+                    <i
+                      style={{
+                        display: "inline-block",
+                        width: 10,
+                        height: 10,
+                        background: "#e11d48",
+                        borderRadius: 3,
+                        marginRight: 4,
+                      }}
+                    />
+                    亏损
+                  </span>
+                </div>
+              </Card>
+            </Col>
+            <Col xs={24} lg={10}>
+              <Card
+                title="💸 费用结构拆解"
+                extra={
+                  <span style={{ fontSize: 12, color: "#888" }}>
+                    合计 {fmt(total.fee)}
+                  </span>
+                }
+              >
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 10 }}
+                >
+                  {feeBreak.map((f) => (
+                    <div key={f.key}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          fontSize: 12,
+                        }}
+                      >
+                        <span>{f.name}</span>
+                        <b>
+                          {fmt(f.value)} · {f.pct.toFixed(0)}%
+                        </b>
                       </div>
                       <div
-                        title={`${m.month} 出售${m.sell}`}
                         style={{
-                          width: "70%",
-                          height: Math.max(6, (m.sell / maxSell) * 140),
-                          borderRadius: "8px 8px 4px 4px",
-                          background: "linear-gradient(180deg,#34d399,#059669)",
+                          height: 8,
+                          background: "#f1f5f9",
+                          borderRadius: 99,
+                          overflow: "hidden",
                         }}
-                      />
-                      <span style={{ fontSize: 11, color: "#888" }}>
-                        {m.month.slice(5)}月·{m.count}台
-                      </span>
+                      >
+                        <div
+                          style={{
+                            width: `${(f.value / maxFee) * 100}%`,
+                            height: "100%",
+                            borderRadius: 99,
+                            background:
+                              "linear-gradient(90deg,#fbbf24,#f97316)",
+                          }}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
-                <Space wrap style={{ marginTop: 10 }}>
-                  {monthly.map((m) => (
-                    <Tag key={m.month} color="green">
-                      {m.month} 利润 {fmt(m.profit)}
-                    </Tag>
-                  ))}
-                </Space>
               </Card>
             </Col>
-            <Col span={8}>
-              <Card title="月度明细">
+          </Row>
+          <Row gutter={[14, 14]}>
+            <Col xs={24} lg={8}>
+              <Card title="🏆 品牌利润榜">
                 <Table
                   size="small"
                   pagination={false}
-                  dataSource={monthly}
-                  rowKey="month"
+                  dataSource={brandStat}
+                  rowKey="brand"
                   columns={[
-                    { title: "月份", dataIndex: "month" },
-                    { title: "台数", dataIndex: "count" },
+                    {
+                      title: "品牌",
+                      dataIndex: "brand",
+                      render: (v, i) => (
+                        <Space>
+                          <Tag color={i < 3 ? "gold" : "default"}>
+                            {brandStat.indexOf(
+                              brandStat.find((x) => x.brand === v),
+                            ) + 1}
+                          </Tag>
+                          <b>{v}</b>
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: "台数/已售",
+                      key: "c",
+                      render: (_, r) => `${r.count}/${r.sold}`,
+                    },
                     {
                       title: "利润",
                       dataIndex: "profit",
@@ -553,8 +1095,91 @@ function Inner() {
                 />
               </Card>
             </Col>
+            <Col xs={24} lg={8}>
+              <Card title="📦 月度明细">
+                <Table
+                  size="small"
+                  pagination={{ pageSize: 5 }}
+                  dataSource={monthly}
+                  rowKey="month"
+                  columns={[
+                    { title: "月份", dataIndex: "month" },
+                    { title: "台数", dataIndex: "count" },
+                    { title: "收入", dataIndex: "sell", render: (v) => fmt(v) },
+                    {
+                      title: "利润",
+                      dataIndex: "profit",
+                      render: (v) => (
+                        <b style={{ color: v >= 0 ? "#16a34a" : "#e11d48" }}>
+                          {fmt(v)}
+                        </b>
+                      ),
+                    },
+                  ]}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card title="🔥 最近回款">
+                <Table
+                  size="small"
+                  pagination={false}
+                  dataSource={recentSold}
+                  rowKey="id"
+                  columns={[
+                    {
+                      title: "设备",
+                      key: "d",
+                      render: (_, r) => (
+                        <>
+                          {r.brand} {r.model}
+                          <br />
+                          <span style={{ fontSize: 11, color: "#999" }}>
+                            {r.incomeDate || r.sellSendDate || r.buyDate}
+                          </span>
+                        </>
+                      ),
+                    },
+                    {
+                      title: "收入",
+                      dataIndex: "sellPrice",
+                      render: (v) => fmt(v),
+                    },
+                    {
+                      title: "利润",
+                      key: "p",
+                      render: (_, r) => {
+                        const p = calcProfit(r);
+                        return (
+                          <b style={{ color: p >= 0 ? "#16a34a" : "#e11d48" }}>
+                            {fmt(p)}
+                          </b>
+                        );
+                      },
+                    },
+                  ]}
+                />
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: "#f0fdf4",
+                    border: "1px dashed #86efac",
+                    borderRadius: 10,
+                    padding: 10,
+                    fontSize: 12,
+                  }}
+                >
+                  出售渠道：
+                  {methodStat.map((m) => (
+                    <Tag key={m.name} style={{ marginBottom: 4 }}>
+                      {m.name}×{m.count}
+                    </Tag>
+                  ))}
+                </div>
+              </Card>
+            </Col>
           </Row>
-        </>
+        </div>
       )}
       {tab === "list" && (
         <>
@@ -573,16 +1198,16 @@ function Inner() {
               }
             >
               <Form.Item name="day" label="日">
-                <DatePicker />
+                <DatePicker placeholder="请选择日期" />
               </Form.Item>
               <Form.Item name="week" label="周">
                 <Input placeholder="2026-W20" style={{ width: 110 }} />
               </Form.Item>
               <Form.Item name="month" label="月">
-                <DatePicker picker="month" />
+                <DatePicker picker="month" placeholder="请选择月份" />
               </Form.Item>
               <Form.Item name="year" label="年">
-                <DatePicker picker="year" />
+                <DatePicker picker="year" placeholder="请选择年份" />
               </Form.Item>
               <Form.Item name="brand" label="品牌">
                 <Input placeholder="Apple" style={{ width: 100 }} />
@@ -620,6 +1245,17 @@ function Inner() {
                   >
                     清空
                   </Button>
+                  <Upload
+                    accept=".xlsx,.xls"
+                    beforeUpload={doImportFile}
+                    showUploadList={false}
+                    maxCount={1}
+                  >
+                    <Button icon={<UploadOutlined />}>导入 xlsx</Button>
+                  </Upload>
+                  <Button icon={<DownloadOutlined />} onClick={doExport}>
+                    导出 xlsx
+                  </Button>
                 </Space>
               </Form.Item>
             </Form>
@@ -628,8 +1264,9 @@ function Inner() {
             <Table
               rowKey="id"
               dataSource={filtered}
-              columns={columns}
-              scroll={{ x: 1100 }}
+              columns={mergedColumns}
+              components={{ header: { cell: ResizableTitle } }}
+              scroll={{ x: 2900 }}
               pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 台` }}
             />
           </Card>
@@ -642,8 +1279,8 @@ function Inner() {
             layout="vertical"
             onFinish={onFinish}
             initialValues={{
-              buyMethod: "邮寄",
-              sellMethod: "平台(闲鱼/转转)",
+              buyMethod: ["邮寄"],
+              sellMethod: ["咸鱼"],
               buyDate: dayjs(),
             }}
           >
@@ -718,25 +1355,28 @@ function Inner() {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="buyMethod" label="收购方式">
+                <Form.Item name="buyMethod" label="收购方式（可多选）">
                   <Select
-                    options={["当面", "邮寄", "平台", "同行调货", "其他"].map(
-                      (v) => ({ value: v, label: v }),
-                    )}
+                    mode="multiple"
+                    allowClear
+                    placeholder="请选择，可多选"
+                    options={METHOD_OPTIONS.map((v) => ({
+                      value: v,
+                      label: v,
+                    }))}
                   />
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="sellMethod" label="出售方式">
+                <Form.Item name="sellMethod" label="出售方式（可多选）">
                   <Select
-                    options={[
-                      "当面",
-                      "邮寄",
-                      "平台(闲鱼/转转)",
-                      "直播",
-                      "同行",
-                      "其他",
-                    ].map((v) => ({ value: v, label: v }))}
+                    mode="multiple"
+                    allowClear
+                    placeholder="请选择，可多选"
+                    options={METHOD_OPTIONS.map((v) => ({
+                      value: v,
+                      label: v,
+                    }))}
                   />
                 </Form.Item>
               </Col>
@@ -793,6 +1433,7 @@ function Inner() {
 export default function Page() {
   return (
     <ConfigProvider
+      locale={zhCN}
       theme={{ token: { colorPrimary: "#5b50e8", borderRadius: 10 } }}
     >
       <App>

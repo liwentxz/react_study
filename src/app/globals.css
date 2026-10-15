@@ -59,3 +59,7 @@ tbody tr:hover{background:#f6f7ff}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .rowflex{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .section{margin-top:14px}
+.react-resizable{position:relative;background-clip:padding-box}
+.react-resizable-handle{position:absolute;right:-6px;top:0;bottom:0;width:12px;cursor:col-resize;z-index:2}
+.react-resizable-handle:hover{background:rgba(91,80,232,.35)}
+th:active .react-resizable-handle{background:rgba(91,80,232,.5)}
