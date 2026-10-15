@@ -50,6 +50,7 @@ function createWindow() {
   } else {
     win.loadURL('app://localhost/index.html')
   }
+  win.maximize()
 }
 
 app.whenReady().then(() => {

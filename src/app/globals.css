@@ -2,7 +2,7 @@
 :root{--bg:#eef1f7;--card:#ffffff;--text:#171c2b;--muted:#8b93a9;--border:#e5e8f1;--primary:#5b50e8;--primary2:#9d4edd;--green:#16a34a;--red:#e11d48;--radius:18px;--shadow:0 10px 30px rgba(60,60,120,.08)}
 html,body{margin:0;padding:0}
 body{background:radial-gradient(1200px 400px at 20% -10%,#e0e7ff 0%,transparent 60%),radial-gradient(1000px 380px at 90% -10%,#fae8ff 0%,transparent 55%),var(--bg);color:var(--text);font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;font-size:14px;min-height:100vh}
-#root{max-width:1300px;margin:0 auto;min-height:100vh;padding:22px 22px 70px}
+#root{width:100%;max-width:none;margin:0;min-height:100vh;padding:22px 26px 70px}
 .hero{background:linear-gradient(135deg,#1e1b4b 0%,#5b50e8 55%,#9d4edd 100%);color:#fff;border-radius:22px;padding:22px 24px;display:flex;align-items:center;gap:16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
 .hero::after{content:"";position:absolute;right:-60px;top:-60px;width:260px;height:260px;background:radial-gradient(circle,rgba(255,255,255,.25),transparent 70%)}
 .logo{width:52px;height:52px;border-radius:16px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);display:grid;place-items:center;font-weight:900;font-size:26px;backdrop-filter:blur(6px)}
