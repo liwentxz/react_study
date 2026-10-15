@@ -1,15 +1,14 @@
 import './globals.css'
-import './App.css'
 
 export const metadata = {
-  title: 'React Study - Next.js',
-  description: 'React + Next.js 全栈学习项目',
+  title: '二手设备出入账管理系统',
+  description: '收购 / 出售 / 费用 / 利润全流程管理',
 }
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="zh-CN">
-      <body>
+    <html lang="zh-CN" suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <div id="root">{children}</div>
       </body>
     </html>
