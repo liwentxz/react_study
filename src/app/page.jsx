@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   App,
   ConfigProvider,
@@ -20,7 +20,6 @@ import {
   Upload,
   message,
   Modal,
-  InputNumber as IN,
 } from "antd";
 import {
   PlusOutlined,
@@ -34,6 +33,8 @@ import "dayjs/locale/zh-cn";
 import zhCN from "antd/locale/zh_CN";
 import { Resizable } from "react-resizable";
 import * as XLSX from "xlsx";
+import ReportsTab from "../components/ReportsTab";
+import { listReports } from "../lib/reportStore";
 dayjs.locale("zh-cn");
 
 const ResizableTitle = (props) => {
@@ -87,8 +88,24 @@ const calcProfit = (r) =>
   n(r.buyShipFee) -
   n(r.sellShipFee) -
   n(r.agentFee) -
-  n(r.platformFee);
-const fmt = (v) => "¥" + (Number(v) || 0).toLocaleString();
+  n(r.platformFee) +
+  n(r.diffPrice);
+const NUM_KEYS = [
+  "buyPrice",
+  "sellPrice",
+  "diffPrice",
+  "accessoryFee",
+  "repairFee",
+  "exposeFee",
+  "buyShipFee",
+  "sellShipFee",
+  "agentFee",
+  "platformFee",
+];
+const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
+const num2 = (v) =>
+  round2(v).toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+const fmt = (v) => (round2(v) < 0 ? "-¥" + num2(-v) : "¥" + num2(v));
 const monthKey = (d) => (d || "").slice(0, 7);
 function weekKey(d) {
   if (!d) return "";
@@ -107,6 +124,7 @@ function Inner() {
   const [qform] = Form.useForm();
   const [filters, setFilters] = useState({});
   const [colWidths, setColWidths] = useState({});
+  const [reportCount, setReportCount] = useState(null);
   const handleResize =
     (key) =>
     (e, { size }) => {
@@ -126,8 +144,15 @@ function Inner() {
     if (mounted)
       try {
         localStorage.setItem(KEY, JSON.stringify(rows));
-      } catch {}
+      } catch {
+        // 本地存储不可写时忽略，避免中断操作
+      }
   }, [rows, mounted]);
+  useEffect(() => {
+    listReports()
+      .then((l) => setReportCount(l.length))
+      .catch(() => {});
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -228,7 +253,6 @@ function Inner() {
       }))
       .sort((a, b) => b.value - a.value);
   }, [rows, total.fee]);
-  const maxFee = Math.max(1, ...feeBreak.map((f) => f.value));
   const brandStat = useMemo(() => {
     const m = {};
     rows.forEach((r) => {
@@ -304,6 +328,13 @@ function Inner() {
       width: 130,
       fixed: "left",
     },
+    {
+      title: "序列号",
+      dataIndex: "serial",
+      key: "serial",
+      width: 150,
+      render: (v) => v || "-",
+    },
     { title: "颜色", dataIndex: "color", key: "color", width: 80 },
     { title: "内存", dataIndex: "memory", key: "memory", width: 100 },
     {
@@ -377,6 +408,22 @@ function Inner() {
       width: 95,
       render: (_, r) => fmt(feeOf(r)),
       sorter: (a, b) => feeOf(a) - feeOf(b),
+    },
+    {
+      title: "补差价",
+      dataIndex: "diffPrice",
+      key: "diffPrice",
+      width: 95,
+      render: (v) => {
+        const x = n(v);
+        if (!x) return "-";
+        return (
+          <span style={{ color: x > 0 ? "#16a34a" : "#e11d48" }}>
+            {fmt(x)}
+          </span>
+        );
+      },
+      sorter: (a, b) => n(a.diffPrice) - n(b.diffPrice),
     },
     {
       title: "利润",
@@ -506,7 +553,6 @@ function Inner() {
             icon={<EditOutlined />}
             onClick={() => {
               setEditing(r.id);
-              Object.entries(r).forEach(([k, v]) => {});
               form.setFieldsValue({
                 ...r,
                 buyMethod: toArr(r.buyMethod),
@@ -552,15 +598,13 @@ function Inner() {
 
   const onFinish = (v) => {
     const o = { ...v };
-    [
-      "buyDate",
-      "buySendDate",
-      "buyArriveDate",
-      "sellSendDate",
-      "sellArriveDate",
-      "incomeDate",
-    ].forEach((k) => {
-      o[k] = v[k] ? v[k].format("YYYY-MM-DD") : "";
+    ["buyDate", "buySendDate", "buyArriveDate", "sellSendDate", "sellArriveDate", "incomeDate"].forEach(
+      (k) => {
+        o[k] = v[k] ? v[k].format("YYYY-MM-DD") : "";
+      },
+    );
+    NUM_KEYS.forEach((k) => {
+      o[k] = o[k] == null || o[k] === "" ? o[k] : round2(o[k]);
     });
     o.buyMethod = joinMethod(v.buyMethod);
     o.sellMethod = joinMethod(v.sellMethod);
@@ -601,6 +645,8 @@ function Inner() {
       "出售发货日期",
       "出售到货日期",
       "入账日期",
+      "序列号",
+      "补差价",
       "利润(自动)",
     ];
     const keys = [
@@ -628,6 +674,8 @@ function Inner() {
       "sellSendDate",
       "sellArriveDate",
       "incomeDate",
+      "serial",
+      "diffPrice",
     ];
     const data = filtered.map((r) => {
       const o = {};
@@ -684,6 +732,8 @@ function Inner() {
           "sellSendDate",
           "sellArriveDate",
           "incomeDate",
+          "serial",
+          "diffPrice",
         ];
         const fmtDate = (v) => {
           if (v === "" || v == null) return "";
@@ -716,6 +766,13 @@ function Inner() {
                 ].includes(k)
               )
                 v = fmtDate(v);
+              else if (
+                NUM_KEYS.includes(k) &&
+                v !== "" &&
+                v != null &&
+                !isNaN(Number(v))
+              )
+                v = round2(v);
               else if (typeof v === "string") v = v.trim();
               o[k] = v;
             });
@@ -752,11 +809,6 @@ function Inner() {
           <div style={{ fontSize: 22, fontWeight: 900 }}>
             二手设备出入账管理系统
           </div>
-          <Tag color="gold">
-            共 {rows.length} 台 · 已售{" "}
-            {rows.filter((r) => n(r.sellPrice) > 0).length} · 在库{" "}
-            {rows.filter((r) => !(n(r.sellPrice) > 0)).length}
-          </Tag>
           <span style={{ flex: 1 }} />
           <Space>
             <Button
@@ -777,9 +829,14 @@ function Inner() {
         activeKey={tab}
         onChange={setTab}
         items={[
-          { key: "home", label: "首页分析" },
+          { key: "home", label: "经营分析" },
           { key: "list", label: `明细列表 (${filtered.length})` },
           { key: "form", label: editing ? "编辑记录" : "填报表单" },
+          {
+            key: "report",
+            label:
+              reportCount == null ? "检测报告" : `检测报告 (${reportCount})`,
+          },
         ]}
       />
       {tab === "home" && (
@@ -798,7 +855,7 @@ function Inner() {
               <Card style={{ borderTop: "3px solid #f59e0b" }}>
                 <Statistic
                   title="收购支出 / 在库货值"
-                  value={total.buy}
+                  value={round2(total.buy)}
                   prefix="¥"
                 />
                 <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
@@ -808,7 +865,11 @@ function Inner() {
             </Col>
             <Col xs={12} md={5}>
               <Card style={{ borderTop: "3px solid #0ea5e9" }}>
-                <Statistic title="出售收入" value={total.sell} prefix="¥" />
+                <Statistic
+                  title="出售收入"
+                  value={round2(total.sell)}
+                  prefix="¥"
+                />
                 <div style={{ fontSize: 12, color: "#888", marginTop: 6 }}>
                   费用合计 {fmt(total.fee)}
                 </div>
@@ -818,7 +879,7 @@ function Inner() {
               <Card style={{ borderTop: "3px solid #16a34a" }}>
                 <Statistic
                   title="累计利润 / 利润率"
-                  value={total.profit}
+                  value={round2(total.profit)}
                   prefix="¥"
                   styles={{
                     content: {
@@ -903,7 +964,7 @@ function Inner() {
                               color: m.profit >= 0 ? "#16a34a" : "#e11d48",
                             }}
                           >
-                            {m.profit}
+                            {num2(m.profit)}
                           </div>
                           <div
                             style={{
@@ -1040,7 +1101,7 @@ function Inner() {
                       >
                         <div
                           style={{
-                            width: `${(f.value / maxFee) * 100}%`,
+                            width: `${Math.min(100, f.pct)}%`,
                             height: "100%",
                             borderRadius: 99,
                             background:
@@ -1198,30 +1259,29 @@ function Inner() {
               }
             >
               <Form.Item name="day" label="日">
-                <DatePicker placeholder="请选择日期" />
+                <DatePicker />
               </Form.Item>
               <Form.Item name="week" label="周">
-                <Input placeholder="2026-W20" style={{ width: 110 }} />
+                <Input style={{ width: 110 }} />
               </Form.Item>
               <Form.Item name="month" label="月">
-                <DatePicker picker="month" placeholder="请选择月份" />
+                <DatePicker picker="month" />
               </Form.Item>
               <Form.Item name="year" label="年">
-                <DatePicker picker="year" placeholder="请选择年份" />
+                <DatePicker picker="year" />
               </Form.Item>
               <Form.Item name="brand" label="品牌">
-                <Input placeholder="Apple" style={{ width: 100 }} />
+                <Input style={{ width: 100 }} />
               </Form.Item>
               <Form.Item name="model" label="型号">
-                <Input placeholder="iPhone" style={{ width: 120 }} />
+                <Input style={{ width: 120 }} />
               </Form.Item>
               <Form.Item name="memory" label="内存">
-                <Input placeholder="256GB" style={{ width: 100 }} />
+                <Input style={{ width: 100 }} />
               </Form.Item>
               <Form.Item name="status" label="状态">
                 <Select
                   allowClear
-                  placeholder="全部"
                   style={{ width: 100 }}
                   options={[
                     { value: "sold", label: "已售" },
@@ -1230,7 +1290,7 @@ function Inner() {
                 />
               </Form.Item>
               <Form.Item name="keyword" label="关键词">
-                <Input placeholder="颜色/地址/机况" style={{ width: 150 }} />
+                <Input style={{ width: 150 }} />
               </Form.Item>
               <Form.Item>
                 <Space>
@@ -1266,7 +1326,7 @@ function Inner() {
               dataSource={filtered}
               columns={mergedColumns}
               components={{ header: { cell: ResizableTitle } }}
-              scroll={{ x: 2900 }}
+              scroll={{ x: 3150 }}
               pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 台` }}
             />
           </Card>
@@ -1274,16 +1334,7 @@ function Inner() {
       )}
       {tab === "form" && (
         <Card title={editing ? "编辑记录" : "填报新机（利润自动计算）"}>
-          <Form
-            form={form}
-            layout="vertical"
-            onFinish={onFinish}
-            initialValues={{
-              buyMethod: ["邮寄"],
-              sellMethod: ["咸鱼"],
-              buyDate: dayjs(),
-            }}
-          >
+          <Form form={form} layout="vertical" onFinish={onFinish}>
             <Row gutter={12}>
               <Col span={6}>
                 <Form.Item
@@ -1296,17 +1347,22 @@ function Inner() {
               </Col>
               <Col span={6}>
                 <Form.Item name="brand" label="品牌">
-                  <Input placeholder="Apple / 华为" />
+                  <Input />
                 </Form.Item>
               </Col>
               <Col span={6}>
                 <Form.Item name="model" label="型号">
-                  <Input placeholder="iPhone 15 Pro" />
+                  <Input />
                 </Form.Item>
               </Col>
               <Col span={6}>
                 <Form.Item name="memory" label="内存">
-                  <Input placeholder="256GB" />
+                  <Input />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item name="serial" label="序列号">
+                  <Input />
                 </Form.Item>
               </Col>
               <Col span={6}>
@@ -1322,6 +1378,15 @@ function Inner() {
               <Col span={6}>
                 <Form.Item name="sellPrice" label="出售价格">
                   <InputNumber min={0} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
+                <Form.Item
+                  name="diffPrice"
+                  label="补差价"
+                  tooltip="正数=客户补给我们（额外收入），负数=我们补给客户（额外支出）"
+                >
+                  <InputNumber style={{ width: "100%" }} />
                 </Form.Item>
               </Col>
               <Col span={6}>
@@ -1359,7 +1424,6 @@ function Inner() {
                   <Select
                     mode="multiple"
                     allowClear
-                    placeholder="请选择，可多选"
                     options={METHOD_OPTIONS.map((v) => ({
                       value: v,
                       label: v,
@@ -1372,7 +1436,6 @@ function Inner() {
                   <Select
                     mode="multiple"
                     allowClear
-                    placeholder="请选择，可多选"
                     options={METHOD_OPTIONS.map((v) => ({
                       value: v,
                       label: v,
@@ -1402,10 +1465,7 @@ function Inner() {
               </Col>
               <Col span={24}>
                 <Form.Item name="condition" label="机况描述">
-                  <Input.TextArea
-                    rows={2}
-                    placeholder="如 95新 电池88 无拆修"
-                  />
+                  <Input.TextArea rows={2} />
                 </Form.Item>
               </Col>
             </Row>
@@ -1426,6 +1486,9 @@ function Inner() {
             </Form.Item>
           </Form>
         </Card>
+      )}
+      {tab === "report" && (
+        <ReportsTab devices={rows} onCountChange={setReportCount} />
       )}
     </div>
   );

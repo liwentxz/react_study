@@ -3,16 +3,18 @@
   "private": true,
   "version": "1.0.0",
   "description": "二手设备出入账管理系统",
+  "author": "liwen",
   "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "node scripts/dev-clean.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "electron": "electron .",
     "electron:dev": "electron .",
-    "dist": "npm run build && electron-builder --win nsis",
-    "dist:dir": "npm run build && electron-builder --win --dir"
+    "dist": "node scripts/dist.js",
+    "dist:dir": "node scripts/dist.js --dir"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
@@ -36,6 +38,8 @@
   "build": {
     "appId": "com.ledger.device",
     "productName": "二手设备出入账管理",
+    "artifactName": "${productName}-${version}-setup.${ext}",
+    "afterPack": "scripts/after-pack.js",
     "files": [
       "out/**/*",
       "electron/**/*",
@@ -44,7 +48,9 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
